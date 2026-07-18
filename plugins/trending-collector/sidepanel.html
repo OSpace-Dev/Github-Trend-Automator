@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Trending</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">DAILY COLLECTION</p>
+      <h1>GitHub Trending</h1>
+    </div>
+    <span id="connectionBadge" class="status-badge" data-status="offline">离线</span>
+  </header>
+
+  <main>
+    <section class="status-section" aria-labelledby="statusHeading">
+      <div class="section-heading">
+        <h2 id="statusHeading">采集状态</h2>
+        <button id="refreshButton" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">↻</button>
+      </div>
+      <div class="status-grid">
+        <div>
+          <span class="label">阶段</span>
+          <strong id="phaseValue">等待中</strong>
+        </div>
+        <div>
+          <span class="label">榜单日期</span>
+          <strong id="trendDateValue">-</strong>
+        </div>
+        <div>
+          <span class="label">项目</span>
+          <strong id="itemCountValue">0</strong>
+        </div>
+        <div>
+          <span class="label">README</span>
+          <strong id="readmeCountValue">0</strong>
+        </div>
+      </div>
+      <p id="statusMessage" class="status-message">等待本地服务</p>
+      <p id="errorMessage" class="error-message" hidden></p>
+      <div class="schedule-row">
+        <span>下次任务</span>
+        <time id="nextRunValue">-</time>
+      </div>
+      <button id="collectButton" class="primary-button" type="button">立即抓取 Daily Trending</button>
+    </section>
+
+    <section class="results-section" aria-labelledby="resultsHeading">
+      <div class="section-heading">
+        <h2 id="resultsHeading">最近结果</h2>
+        <time id="completedAtValue">-</time>
+      </div>
+      <ol id="resultsList" class="results-list"></ol>
+      <p id="emptyResults" class="empty-state">还没有已完成的采集结果</p>
+    </section>
+
+    <section class="settings-section" aria-labelledby="settingsHeading">
+      <details>
+        <summary id="settingsHeading">连接设置</summary>
+        <label>
+          <span>本地服务地址</span>
+          <input id="serverOriginInput" type="url" spellcheck="false" autocomplete="off">
+        </label>
+        <label>
+          <span>扩展令牌</span>
+          <input id="extensionTokenInput" type="password" spellcheck="false" autocomplete="off">
+        </label>
+        <button id="saveButton" class="secondary-button" type="button">保存并重连</button>
+      </details>
+    </section>
+  </main>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

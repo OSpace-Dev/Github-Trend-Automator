@@ -1,0 +1,14 @@
+{
+  "name": "github-trend-automator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Daily GitHub Trending collection through a browser extension and local SQLite service.",
+  "scripts": {
+    "start": "node support/api/github-trending/server.js",
+    "test": "node --test",
+    "check": "node --check support/api/github-trending/server.js && node --check plugins/trending-collector/background.js && node --check plugins/trending-collector/content-script.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
