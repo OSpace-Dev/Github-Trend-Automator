@@ -41,6 +41,8 @@ test("stores a completed daily Trending snapshot", async () => {
     const collectEvent = await eventPromise;
     assert.equal(collectEvent.data.jobId, jobId);
     assert.equal(collectEvent.data.url, "https://github.com/trending?since=daily");
+    assert.equal(collectEvent.data.readmeDelayMinMs, 2000);
+    assert.equal(collectEvent.data.readmeDelayMaxMs, 5000);
 
     const statusResponse = await fetch(`${baseUrl}/extension/jobs/${jobId}/status`, {
       method: "POST",
@@ -88,6 +90,42 @@ test("stores a completed daily Trending snapshot", async () => {
     const completedJob = await jobResponse.json();
     assert.equal(completedJob.job.status, "completed");
     assert.equal(completedJob.job.itemCount, 1);
+    const statsResponse = await fetch(`${baseUrl}/api/github-trending/stats`, {
+      headers: { Authorization: "Bearer api-test-token", Origin: "http://127.0.0.1:5174" }
+    });
+    assert.equal(statsResponse.status, 200);
+    assert.equal(statsResponse.headers.get("access-control-allow-origin"), "http://127.0.0.1:5174");
+    assert.equal((await statsResponse.json()).stats.totalSnapshots, 1);
+
+    const settingsResponse = await fetch(`${baseUrl}/api/github-trending/settings`, {
+      headers: { Authorization: "Bearer api-test-token", Origin: "http://127.0.0.1:5174" }
+    });
+    assert.equal(settingsResponse.status, 200);
+    const currentSettings = await settingsResponse.json();
+    assert.equal(currentSettings.settings.scheduleTime, "09:00");
+
+    const updateResponse = await fetch(`${baseUrl}/api/github-trending/settings`, {
+      method: "PUT",
+      headers: {
+        Authorization: "Bearer api-test-token",
+        Origin: "http://127.0.0.1:5174",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        scheduleTime: "10:45",
+        readmeDelayMinSeconds: 1.5,
+        readmeDelayMaxSeconds: 4
+      })
+    });
+    assert.equal(updateResponse.status, 200);
+    assert.equal((await updateResponse.json()).settings.readmeDelayMinSeconds, 1.5);
+
+    const invalidResponse = await fetch(`${baseUrl}/api/github-trending/settings`, {
+      method: "PUT",
+      headers: { Authorization: "Bearer api-test-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ scheduleTime: "25:00", readmeDelayMinSeconds: 1, readmeDelayMaxSeconds: 2 })
+    });
+    assert.equal(invalidResponse.status, 400);
     await collectEvent.reader.cancel();
   } finally {
     await app.close();

@@ -1,104 +1,92 @@
 # GitHub Trend Automator
 
-[English](README.md) | 简体中文
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-GitHub Trend Automator 通过 Chrome/Edge 扩展采集 GitHub Daily Trending 公共榜单，并按天保存 SQLite 快照。本地 Node.js 服务在北京时间每天 09:00 创建任务，通过 SSE 分发给已连接的扩展，再持久化扩展回传的仓库字段和 README 原文。
+GitHub Trend Automator 通过 Manifest V3 浏览器插件采集 GitHub 每日 Trending，使用公开 README 接口补充仓库信息，并将每日结果保存为 SQLite 快照。本地 Node.js 服务负责调度、通过 SSE 下发任务，并提供一个紧凑的 Vue 管理页面。
 
-## 组成部分
+## 项目组成
 
 ```text
-.
-├─ plugins/
-│  └─ trending-collector/       # Manifest V3 扩展与 side panel
-├─ support/
-│  └─ api/
-│     └─ github-trending/       # 调度、HTTP API、SSE 桥接和 SQLite 存储
-└─ tests/                       # 调度与 API 集成测试
+plugins/trending-collector/                 Manifest V3 插件与侧边栏
+support/api/github-trending/                Node.js API、调度器、SSE 桥接与 SQLite 存储
+support/admin/github-trending-admin/        Vue 3 管理页面
+tests/                                       Node.js 回归测试
 ```
-
-## 采集内容
-
-每个每日快照包含：
-
-- Trending 排名与榜单日期
-- 仓库所有者、名称、描述和 URL
-- 主要编程语言
-- 总 stars 与总 forks
-- 今日新增 stars
-- README 原文与 README 获取状态
-- 采集时间和任务 ID
-
-快照以“榜单日期 + 仓库”为唯一键。同一天重复执行任务会更新当天快照，不会产生重复记录。
 
 ## 环境要求
 
-- Node.js 22 或更高版本，并支持 `node:sqlite`
+- Node.js 22 或更高版本（使用 `node:sqlite`）
 - Chrome 或 Edge 116 或更高版本
-- 能够访问 `github.com` 和 `api.github.com`
+- 可以访问 `github.com` 和 `api.github.com`
 
-Trending 页面和 README 接口均为公开内容。本项目不保存 GitHub 密码、Cookie、Personal Access Token 或 SSH 私钥。
+采集器使用 GitHub 公开页面和公开 README 接口，不保存 GitHub 密码、Cookie、Personal Access Token 或 SSH 私钥。
 
 ## 快速开始
 
-### 1. 启动本地服务
+在本目录执行：
 
 ```powershell
+npm install
 npm start
 ```
 
-默认服务地址为 `http://127.0.0.1:8011`。如果服务在北京时间 09:00 后首次启动，会自动补建当天尚未创建的定时任务。
+服务默认监听 `http://127.0.0.1:8011`。然后在 `chrome://extensions/` 或 `edge://extensions/` 开启开发者模式，加载 `plugins/trending-collector/`。
 
-### 2. 加载扩展
+在另一个终端安装并启动管理页面：
 
-1. 打开 `chrome://extensions/` 或 `edge://extensions/`。
-2. 开启“开发者模式”。
-3. 点击“加载已解压的扩展程序”。
-4. 选择 `plugins/trending-collector/`。
-5. 点击扩展图标打开 side panel。
+```powershell
+cd support/admin/github-trending-admin
+npm install
+npm run dev
+```
 
-扩展会自动连接本地服务，也可以在 side panel 中点击“立即抓取 Daily Trending”执行手动补抓。
+打开 `http://127.0.0.1:5174`。管理页面只会在浏览器 `localStorage` 中保存本地 API 地址和 API Token；默认值是开发占位符。
 
-## 配置
+## 采集与调度
 
-| 环境变量 | 用途 | 默认值 |
-| --- | --- | --- |
-| `GITHUB_TRENDING_HOST` | 服务监听地址 | `127.0.0.1` |
-| `GITHUB_TRENDING_PORT` | 服务监听端口 | `8011` |
-| `GITHUB_TRENDING_API_TOKEN` | 查询 API 令牌 | 开发占位值 |
-| `GITHUB_TRENDING_EXTENSION_TOKEN` | 扩展桥接令牌 | 开发占位值 |
-| `GITHUB_TRENDING_DB_PATH` | SQLite 数据库路径 | `tmp/github-trending.sqlite` |
-| `GITHUB_TRENDING_SCHEDULE_HOUR` | Asia/Shanghai 每日执行小时 | `9` |
-| `GITHUB_TRENDING_LOG_LEVEL` | 日志级别 | `info` |
+README 请求采用串行执行。每次请求之间会在可配置的最小值和最大值之间随机等待，默认间隔为 2–5 秒，避免单个任务短时间内产生请求突发。单个 README 获取失败会记录在对应仓库上，不会丢弃 Trending 快照。
 
-内置令牌只用于本机开发。对 localhost 以外地址开放服务前必须替换两个令牌，并同步修改扩展中的连接设置。
+每日调度时间使用固定 `Asia/Shanghai` 时区的 `HH:mm` 格式，默认 `09:00`。管理页面可以修改调度时间和 README 间隔，保存后会立即重新计算下一次执行时间。
 
 ## API
 
-所有 `/api/` 接口都要求：
+所有 `/api/` 接口都需要 `Authorization: Bearer <GITHUB_TRENDING_API_TOKEN>`。
 
-```text
-Authorization: Bearer <GITHUB_TRENDING_API_TOKEN>
-```
-
-| 方法 | 接口 | 用途 |
+| 方法 | 接口 | 作用 |
 | --- | --- | --- |
-| `GET` | `/health` | 查询服务、扩展、队列与调度状态 |
+| `GET` | `/health` | 服务、插件、队列、调度和设置状态 |
+| `GET` | `/api/github-trending/stats` | 管理首页统计数据 |
+| `GET` | `/api/github-trending/settings` | 当前设置和下一次执行时间 |
+| `PUT` | `/api/github-trending/settings` | 更新 `scheduleTime`、`readmeDelayMinSeconds`、`readmeDelayMaxSeconds` |
 | `POST` | `/api/github-trending/jobs` | 创建手动采集任务 |
 | `GET` | `/api/github-trending/jobs` | 查询最近任务 |
-| `GET` | `/api/github-trending/jobs/{jobId}` | 查询单个任务 |
-| `GET` | `/api/github-trending/snapshots?date=YYYY-MM-DD` | 查询每日快照 |
+| `GET` | `/api/github-trending/snapshots?date=YYYY-MM-DD` | 查询每日快照（`includeReadme=0` 返回摘要） |
 
-## 开发验证
+## 配置项
+
+| 环境变量 | 作用 | 默认值 |
+| --- | --- | --- |
+| `GITHUB_TRENDING_HOST` | 服务监听地址 | `127.0.0.1` |
+| `GITHUB_TRENDING_PORT` | 服务监听端口 | `8011` |
+| `GITHUB_TRENDING_API_TOKEN` | 管理 API Token | 开发占位符 |
+| `GITHUB_TRENDING_EXTENSION_TOKEN` | 插件桥接 Token | 开发占位符 |
+| `GITHUB_TRENDING_DB_PATH` | SQLite 数据库路径 | `tmp/github-trending.sqlite` |
+| `GITHUB_TRENDING_SCHEDULE_TIME` | 每日 `HH:mm` 调度时间 | `09:00` |
+| `GITHUB_TRENDING_README_DELAY_MIN_MS` | 初始最小间隔 | `2000` |
+| `GITHUB_TRENDING_README_DELAY_MAX_MS` | 初始最大间隔 | `5000` |
+| `GITHUB_TRENDING_ADMIN_ORIGINS` | 允许的本地管理页面来源 | `127.0.0.1:5174,localhost:5174` |
+
+环境变量只用于初始化新数据库。管理页面保存的设置会在后续重启时继续生效。
+
+## 开发检查
 
 ```powershell
 npm test
 npm run check
+npm run admin:typecheck
+npm run admin:build
 ```
 
-GitHub 公共 API 对每个 IP 的未认证请求限制为每小时 60 次。正常 Daily Trending 榜单项目数低于该限制，但短时间反复手动执行可能导致 README 请求触发限流。限流错误会按仓库保存，不会阻止 Trending 榜单快照入库。
+GitHub 未认证 API 按 IP 限制请求频率。默认的串行策略和随机间隔可以降低突发请求，但反复手动执行仍可能触发限流；此类错误会按仓库保存。
 
-## 使用说明
-
-- 采集器读取公共 `https://github.com/trending` 页面，并固定使用 `since=daily`。
-- 扩展会为每个任务打开受管理的后台标签页，采集结束后自动关闭。
-- 使用者应自行确认采集及后续处理符合 GitHub 服务条款和适用的数据使用要求。
+请确保采集和后续数据处理符合 GitHub 服务条款及适用的数据使用要求。

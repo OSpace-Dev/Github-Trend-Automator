@@ -1,62 +1,66 @@
 # GitHub Trend Automator
 
-English | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-GitHub Trend Automator collects the public GitHub Daily Trending list through a Chrome/Edge extension and stores one SQLite snapshot per day. The local Node.js service creates the daily job at 09:00 Asia/Shanghai, dispatches it to the connected extension over SSE, and persists the returned repository metadata and README source.
+GitHub Trend Automator collects GitHub Daily Trending through a Manifest V3 browser extension, enriches repositories with public README data, and stores daily SQLite snapshots. A local Node.js service schedules jobs, dispatches them over SSE, and provides a compact Vue operations console.
 
 ## Components
 
 ```text
-.
-├─ plugins/
-│  └─ trending-collector/       # Manifest V3 extension and side panel
-├─ support/
-│  └─ api/
-│     └─ github-trending/       # Scheduler, HTTP API, SSE bridge, SQLite store
-└─ tests/                       # Scheduler and API integration tests
+plugins/trending-collector/                 Manifest V3 extension and side panel
+support/api/github-trending/                Node.js API, scheduler, SSE bridge, SQLite store
+support/admin/github-trending-admin/        Vue 3 management page
+tests/                                       Node.js regression tests
 ```
-
-## Collected Data
-
-Each daily snapshot includes:
-
-- Trending rank and date
-- Repository owner, name, description, and URL
-- Primary language
-- Total stars and forks
-- Stars gained today
-- README source and README fetch status
-- Collection timestamp and job ID
-
-Snapshots use `trend date + repository` as their unique key. Re-running a job on the same day updates that day's snapshot instead of creating a duplicate.
 
 ## Requirements
 
-- Node.js 22 or later with `node:sqlite`
+- Node.js 22 or later (uses `node:sqlite`)
 - Chrome or Edge 116 or later
 - Network access to `github.com` and `api.github.com`
 
-The Trending page and README endpoint are public. No GitHub password, cookie, Personal Access Token, or SSH private key is stored by this project.
+The collector uses public GitHub pages and the public README API. It does not store a GitHub password, cookie, Personal Access Token, or SSH private key.
 
 ## Quick Start
 
-### 1. Start the Local Service
+From this directory:
 
 ```powershell
+npm install
 npm start
 ```
 
-The default service URL is `http://127.0.0.1:8011`. On startup after 09:00 Asia/Shanghai, the service creates today's missing scheduled job as a catch-up task.
+The service listens on `http://127.0.0.1:8011`. After starting the extension, load `plugins/trending-collector/` as an unpacked extension from `chrome://extensions/` or `edge://extensions/`.
 
-### 2. Load the Extension
+In another terminal, install and start the management page:
 
-1. Open `chrome://extensions/` or `edge://extensions/`.
-2. Enable Developer mode.
-3. Select **Load unpacked**.
-4. Choose `plugins/trending-collector/`.
-5. Click the extension icon to open the side panel.
+```powershell
+cd support/admin/github-trending-admin
+npm install
+npm run dev
+```
 
-The extension connects to the local service automatically. Use **Collect Daily Trending Now** in the side panel for a manual run.
+Open `http://127.0.0.1:5174`. The page stores only the local API origin and API token in browser `localStorage`; the default values are development placeholders.
+
+## Collection and Scheduling
+
+README requests run serially. Between requests the extension waits a random delay between the configured minimum and maximum (defaults: 2–5 seconds). This keeps a single job from issuing a burst of requests. A README failure is recorded on that repository and does not discard the Trending snapshot.
+
+The daily schedule uses `HH:mm` in fixed `Asia/Shanghai` time and defaults to `09:00`. The management page can update both the schedule and the README delay range; the next run is recalculated immediately.
+
+## API
+
+All `/api/` endpoints require `Authorization: Bearer <GITHUB_TRENDING_API_TOKEN>`.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Service, extension, queue, schedule, and settings state |
+| `GET` | `/api/github-trending/stats` | Dashboard statistics |
+| `GET` | `/api/github-trending/settings` | Current settings and next run |
+| `PUT` | `/api/github-trending/settings` | Update `scheduleTime`, `readmeDelayMinSeconds`, and `readmeDelayMaxSeconds` |
+| `POST` | `/api/github-trending/jobs` | Queue a manual collection job |
+| `GET` | `/api/github-trending/jobs` | List recent jobs |
+| `GET` | `/api/github-trending/snapshots?date=YYYY-MM-DD` | Read a daily snapshot (`includeReadme=0` returns summaries) |
 
 ## Configuration
 
@@ -64,41 +68,25 @@ The extension connects to the local service automatically. Use **Collect Daily T
 | --- | --- | --- |
 | `GITHUB_TRENDING_HOST` | Service listening address | `127.0.0.1` |
 | `GITHUB_TRENDING_PORT` | Service listening port | `8011` |
-| `GITHUB_TRENDING_API_TOKEN` | Query API token | Development placeholder |
+| `GITHUB_TRENDING_API_TOKEN` | Management API token | Development placeholder |
 | `GITHUB_TRENDING_EXTENSION_TOKEN` | Extension bridge token | Development placeholder |
 | `GITHUB_TRENDING_DB_PATH` | SQLite database path | `tmp/github-trending.sqlite` |
-| `GITHUB_TRENDING_SCHEDULE_HOUR` | Daily hour in Asia/Shanghai | `9` |
-| `GITHUB_TRENDING_LOG_LEVEL` | Log level | `info` |
+| `GITHUB_TRENDING_SCHEDULE_TIME` | Daily `HH:mm` schedule | `09:00` |
+| `GITHUB_TRENDING_README_DELAY_MIN_MS` | Initial minimum delay | `2000` |
+| `GITHUB_TRENDING_README_DELAY_MAX_MS` | Initial maximum delay | `5000` |
+| `GITHUB_TRENDING_ADMIN_ORIGINS` | Allowed local admin origins | `127.0.0.1:5174,localhost:5174` |
 
-The built-in tokens are for local development only. Replace both tokens before listening beyond localhost, and update the extension connection settings to match.
+Environment values initialize a new database only. Settings saved by the management page remain authoritative on later restarts.
 
-## API
-
-All `/api/` endpoints require:
-
-```text
-Authorization: Bearer <GITHUB_TRENDING_API_TOKEN>
-```
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Service, extension, queue, and schedule state |
-| `POST` | `/api/github-trending/jobs` | Queue a manual collection job |
-| `GET` | `/api/github-trending/jobs` | List recent jobs |
-| `GET` | `/api/github-trending/jobs/{jobId}` | Read one job |
-| `GET` | `/api/github-trending/snapshots?date=YYYY-MM-DD` | Read a daily snapshot |
-
-## Development
+## Development Checks
 
 ```powershell
 npm test
 npm run check
+npm run admin:typecheck
+npm run admin:build
 ```
 
-The public GitHub API allows 60 unauthenticated requests per hour per IP. A normal Daily Trending page contains fewer repositories than this limit, but repeated manual runs may cause README requests to return rate-limit errors. Those errors are stored per repository and do not prevent the Trending snapshot from being saved.
+The unauthenticated GitHub API has a per-IP rate limit. The default delay and serial README strategy reduce burst traffic, but repeated manual runs can still be rate-limited. Such errors are stored per repository.
 
-## Usage Notes
-
-- The collector reads the public `https://github.com/trending` page with `since=daily`.
-- The extension opens a managed background tab for each job and closes it when collection finishes.
-- Users are responsible for ensuring that collection and downstream processing comply with GitHub's Terms of Service and applicable data-use requirements.
+Use only in ways that comply with GitHub's Terms of Service and applicable data-use requirements.

@@ -10,13 +10,18 @@ function createApp(options = {}) {
     ...config,
     ...options
   };
-  const store = options.store || new TrendingStore(appConfig.databasePath);
+  const store = options.store || new TrendingStore(appConfig.databasePath, {
+    scheduleTime: appConfig.defaultScheduleTime,
+    readmeDelayMinMs: appConfig.defaultReadmeDelayMinMs,
+    readmeDelayMaxMs: appConfig.defaultReadmeDelayMaxMs
+  });
+  const initialSettings = store.getSettings();
   const clients = new Map();
   const assignments = new Map();
   let dispatching = false;
 
   const scheduler = options.scheduler || new DailyScheduler({
-    hour: appConfig.scheduleHour,
+    scheduleTime: initialSettings.scheduleTime,
     async onDue(trendDate, source) {
       const job = store.ensureScheduledJob(trendDate);
       logger.info("scheduled_job_ready", { jobId: job.jobId, trendDate, source, status: job.status });
@@ -27,6 +32,12 @@ function createApp(options = {}) {
   const server = http.createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+      const corsAllowed = applyCors(request, response, appConfig.adminOrigins);
+      if (request.method === "OPTIONS") {
+        return corsAllowed
+          ? sendEmpty(response, 204)
+          : sendJson(response, 403, { ok: false, error: "origin_not_allowed" });
+      }
       await route(request, response, requestUrl);
     } catch (error) {
       logger.error("request_failed", { method: request.method, url: request.url, error: error.message });
@@ -49,7 +60,8 @@ function createApp(options = {}) {
         ok: true,
         extensionClients: clients.size,
         queuedJob: store.getNextQueuedJob(),
-        schedule: scheduler.getState()
+        schedule: scheduler.getState(),
+        settings: store.getSettings()
       });
     }
 
@@ -120,6 +132,37 @@ function createApp(options = {}) {
       requireBearer(request, appConfig.apiToken, "unauthorized_api");
     }
 
+    if (request.method === "GET" && pathname === "/api/github-trending/stats") {
+      return sendJson(response, 200, {
+        ok: true,
+        stats: store.getStats(getShanghaiDateKey()),
+        extensionClients: clients.size
+      });
+    }
+
+    if (request.method === "GET" && pathname === "/api/github-trending/settings") {
+      return sendJson(response, 200, {
+        ok: true,
+        settings: toPublicSettings(store.getSettings()),
+        schedule: scheduler.getState()
+      });
+    }
+
+    if (request.method === "PUT" && pathname === "/api/github-trending/settings") {
+      const body = await readJson(request, appConfig.maxRequestBytes);
+      const settings = validateSettings(body);
+      const updated = store.updateSettings(settings);
+      const schedule = typeof scheduler.reschedule === "function"
+        ? scheduler.reschedule(updated.scheduleTime)
+        : scheduler.getState();
+      logger.info("settings_updated", { ...toPublicSettings(updated), nextRunAt: schedule.nextRunAt });
+      return sendJson(response, 200, {
+        ok: true,
+        settings: toPublicSettings(updated),
+        schedule
+      });
+    }
+
     if (request.method === "POST" && pathname === "/api/github-trending/jobs") {
       const job = store.createJob({
         trendDate: getShanghaiDateKey(),
@@ -146,7 +189,8 @@ function createApp(options = {}) {
       const trendDate = normalizeDate(requestUrl.searchParams.get("date"));
       const limit = readLimit(requestUrl.searchParams.get("limit"), 100, 200);
       const offset = readLimit(requestUrl.searchParams.get("offset"), 0, 100000);
-      const items = store.listSnapshots({ trendDate, limit, offset });
+      const includeReadme = requestUrl.searchParams.get("includeReadme") !== "0";
+      const items = store.listSnapshots({ trendDate, limit, offset, includeReadme });
       return sendJson(response, 200, { ok: true, items });
     }
 
@@ -200,10 +244,13 @@ function createApp(options = {}) {
         }
         store.markDispatched(job.jobId);
         assignments.set(availableClient.clientId, job.jobId);
+        const settings = store.getSettings();
         sendSse(availableClient.response, "collect_trending", {
           jobId: job.jobId,
           trendDate: job.trendDate,
-          url: "https://github.com/trending?since=daily"
+          url: "https://github.com/trending?since=daily",
+          readmeDelayMinMs: settings.readmeDelayMinMs,
+          readmeDelayMaxMs: settings.readmeDelayMaxMs
         });
         logger.info("job_dispatched", {
           jobId: job.jobId,
@@ -256,6 +303,52 @@ function createApp(options = {}) {
       }
     }
   };
+}
+
+function validateSettings(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw badRequest("invalid_settings");
+  }
+  const scheduleTime = String(value.scheduleTime || "");
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(scheduleTime)) {
+    throw badRequest("invalid_schedule_time");
+  }
+  const minSeconds = Number(value.readmeDelayMinSeconds);
+  const maxSeconds = Number(value.readmeDelayMaxSeconds);
+  if (!Number.isFinite(minSeconds) || !Number.isFinite(maxSeconds)
+    || minSeconds < 0 || maxSeconds < minSeconds || maxSeconds > 60) {
+    throw badRequest("invalid_readme_delay_range");
+  }
+  return {
+    scheduleTime,
+    readmeDelayMinMs: Math.round(minSeconds * 1000),
+    readmeDelayMaxMs: Math.round(maxSeconds * 1000)
+  };
+}
+
+function toPublicSettings(settings) {
+  return {
+    scheduleTime: settings.scheduleTime,
+    timeZone: "Asia/Shanghai",
+    readmeDelayMinSeconds: settings.readmeDelayMinMs / 1000,
+    readmeDelayMaxSeconds: settings.readmeDelayMaxMs / 1000
+  };
+}
+
+function applyCors(request, response, allowedOrigins = []) {
+  const origin = request.headers.origin;
+  if (!origin) {
+    return true;
+  }
+  if (!allowedOrigins.includes(origin)) {
+    return false;
+  }
+  response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Vary", "Origin");
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  response.setHeader("Access-Control-Max-Age", "600");
+  return true;
 }
 
 function validateItems(value) {
@@ -403,6 +496,11 @@ function sendJson(response, statusCode, payload) {
   response.end(body);
 }
 
+function sendEmpty(response, statusCode) {
+  response.writeHead(statusCode, { "Content-Length": "0" });
+  response.end();
+}
+
 if (require.main === module) {
   const app = createApp();
   app.listen().catch((error) => {
@@ -418,4 +516,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { createApp, validateItems };
+module.exports = { createApp, validateItems, validateSettings };

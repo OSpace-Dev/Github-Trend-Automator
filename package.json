@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node support/api/github-trending/server.js",
     "test": "node --test",
-    "check": "node --check support/api/github-trending/server.js && node --check plugins/trending-collector/background.js && node --check plugins/trending-collector/content-script.js"
+    "check": "node --check support/api/github-trending/server.js && node --check support/api/github-trending/scheduler.js && node --check support/api/github-trending/store.js && node --check plugins/trending-collector/background.js && node --check plugins/trending-collector/content-script.js",
+    "admin:dev": "npm --prefix support/admin/github-trending-admin run dev",
+    "admin:build": "npm --prefix support/admin/github-trending-admin run build",
+    "admin:typecheck": "npm --prefix support/admin/github-trending-admin run typecheck"
   },
   "engines": {
     "node": ">=22"

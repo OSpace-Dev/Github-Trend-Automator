@@ -4,12 +4,13 @@ const { randomUUID } = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
 
 class TrendingStore {
-  constructor(databasePath) {
+  constructor(databasePath, defaultSettings = {}) {
     fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     this.db = new DatabaseSync(databasePath);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.migrate();
+    this.initializeSettings(defaultSettings);
     this.prepare();
   }
 
@@ -56,7 +57,28 @@ class TrendingStore {
 
       CREATE INDEX IF NOT EXISTS idx_snapshots_date_rank
       ON snapshots(trend_date DESC, rank ASC);
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
     `);
+  }
+
+  initializeSettings(defaultSettings) {
+    const defaults = {
+      schedule_time: defaultSettings.scheduleTime || "09:00",
+      readme_delay_min_ms: String(defaultSettings.readmeDelayMinMs ?? 2000),
+      readme_delay_max_ms: String(defaultSettings.readmeDelayMaxMs ?? 5000)
+    };
+    const statement = this.db.prepare(`
+      INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+    for (const [key, value] of Object.entries(defaults)) {
+      statement.run(key, String(value), now);
+    }
   }
 
   prepare() {
@@ -83,6 +105,10 @@ class TrendingStore {
         readme_error = excluded.readme_error,
         captured_at = excluded.captured_at,
         job_id = excluded.job_id
+    `);
+    this.upsertSettingStatement = this.db.prepare(`
+      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `);
   }
 
@@ -120,6 +146,60 @@ class TrendingStore {
       SELECT ${JOB_COLUMNS} FROM jobs
       ORDER BY created_at DESC LIMIT ?
     `).all(limit);
+  }
+
+  getSettings() {
+    const values = Object.fromEntries(
+      this.db.prepare("SELECT key, value FROM settings").all()
+        .map((row) => [row.key, row.value])
+    );
+    return {
+      scheduleTime: values.schedule_time || "09:00",
+      readmeDelayMinMs: Number(values.readme_delay_min_ms) || 0,
+      readmeDelayMaxMs: Number(values.readme_delay_max_ms) || 0
+    };
+  }
+
+  updateSettings(settings) {
+    const now = new Date().toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.upsertSettingStatement.run("schedule_time", settings.scheduleTime, now);
+      this.upsertSettingStatement.run("readme_delay_min_ms", String(settings.readmeDelayMinMs), now);
+      this.upsertSettingStatement.run("readme_delay_max_ms", String(settings.readmeDelayMaxMs), now);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getSettings();
+  }
+
+  getStats(today) {
+    const snapshotStats = this.db.prepare(`
+      SELECT
+        COUNT(*) AS totalSnapshots,
+        COUNT(DISTINCT full_name) AS uniqueRepositories,
+        COUNT(DISTINCT trend_date) AS trendDays,
+        SUM(CASE WHEN trend_date = ? THEN 1 ELSE 0 END) AS todaySnapshots,
+        MAX(trend_date) AS latestTrendDate
+      FROM snapshots
+    `).get(today);
+    const jobStats = this.db.prepare(`
+      SELECT
+        COUNT(*) AS totalJobs,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedJobs
+      FROM jobs
+    `).get();
+    return {
+      totalSnapshots: Number(snapshotStats.totalSnapshots || 0),
+      uniqueRepositories: Number(snapshotStats.uniqueRepositories || 0),
+      trendDays: Number(snapshotStats.trendDays || 0),
+      todaySnapshots: Number(snapshotStats.todaySnapshots || 0),
+      totalJobs: Number(jobStats.totalJobs || 0),
+      failedJobs: Number(jobStats.failedJobs || 0),
+      latestTrendDate: snapshotStats.latestTrendDate || null
+    };
   }
 
   getNextQueuedJob() {
@@ -205,15 +285,16 @@ class TrendingStore {
     return this.getJob(jobId);
   }
 
-  listSnapshots({ trendDate = null, limit = 100, offset = 0 } = {}) {
+  listSnapshots({ trendDate = null, limit = 100, offset = 0, includeReadme = true } = {}) {
+    const columns = includeReadme ? SNAPSHOT_COLUMNS : SNAPSHOT_SUMMARY_COLUMNS;
     if (trendDate) {
       return this.db.prepare(`
-        SELECT ${SNAPSHOT_COLUMNS} FROM snapshots
+        SELECT ${columns} FROM snapshots
         WHERE trend_date = ? ORDER BY rank ASC LIMIT ? OFFSET ?
       `).all(trendDate, limit, offset);
     }
     return this.db.prepare(`
-      SELECT ${SNAPSHOT_COLUMNS} FROM snapshots
+      SELECT ${columns} FROM snapshots
       WHERE trend_date = (SELECT MAX(trend_date) FROM snapshots)
       ORDER BY rank ASC LIMIT ? OFFSET ?
     `).all(limit, offset);
@@ -249,6 +330,25 @@ const SNAPSHOT_COLUMNS = `
   total_forks AS totalForks,
   stars_today AS starsToday,
   readme_content AS readmeContent,
+  readme_url AS readmeUrl,
+  readme_error AS readmeError,
+  captured_at AS capturedAt,
+  job_id AS jobId
+`;
+
+const SNAPSHOT_SUMMARY_COLUMNS = `
+  trend_date AS trendDate,
+  rank,
+  owner,
+  repository,
+  full_name AS fullName,
+  description,
+  url,
+  language,
+  total_stars AS totalStars,
+  total_forks AS totalForks,
+  stars_today AS starsToday,
+  CASE WHEN readme_content IS NOT NULL THEN 1 ELSE 0 END AS hasReadme,
   readme_url AS readmeUrl,
   readme_error AS readmeError,
   captured_at AS capturedAt,

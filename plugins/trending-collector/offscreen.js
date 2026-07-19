@@ -21,7 +21,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "GITHUB_TRENDING_ENRICH_READMES") {
     (async () => {
       try {
-        const items = await enrichReadmes(message.items || []);
+        const items = await enrichReadmes(
+          message.items || [],
+          message.readmeDelayMinMs,
+          message.readmeDelayMaxMs
+        );
         sendResponse({ ok: true, items });
       } catch (error) {
         sendResponse({ ok: false, error: error.message });
@@ -129,17 +133,21 @@ function startHeartbeat() {
   }, 20000);
 }
 
-async function enrichReadmes(items) {
-  const output = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(4, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      output[index] = await enrichReadme(items[index]);
+async function enrichReadmes(items, minValue, maxValue) {
+  const output = [];
+  const range = globalThis.GithubReadmeThrottle.normalizeDelayRange(minValue, maxValue);
+  for (let index = 0; index < items.length; index += 1) {
+    output.push(await enrichReadme(items[index]));
+    chrome.runtime.sendMessage({
+      type: "GITHUB_TRENDING_README_PROGRESS",
+      completed: index + 1,
+      total: items.length
+    }).catch(() => {});
+    if (index < items.length - 1) {
+      const delayMs = globalThis.GithubReadmeThrottle.chooseDelayMs(range);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-  });
-  await Promise.all(workers);
+  }
   return output;
 }
 

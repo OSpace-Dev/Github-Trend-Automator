@@ -46,10 +46,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await handleBridgeState(message);
           response = { ok: true };
           break;
-        case "GITHUB_TRENDING_COLLECT_JOB":
-          await startCollectionJob(message.job);
-          response = { ok: true };
-          break;
+      case "GITHUB_TRENDING_COLLECT_JOB":
+        await startCollectionJob(message.job);
+        response = { ok: true };
+        break;
+      case "GITHUB_TRENDING_README_PROGRESS":
+        await updateCollectorState({
+          readmeCount: Number(message.completed) || 0,
+          message: `Fetching README files (${Number(message.completed) || 0}/${Number(message.total) || 0})`
+        });
+        response = { ok: true };
+        break;
         case "GITHUB_TRENDING_CONTENT_READY":
           await handleTrendingTabReady(sender.tab?.id);
           response = { ok: true };
@@ -106,6 +113,7 @@ function isHandledMessage(type) {
     "GITHUB_TRENDING_OFFSCREEN_READY",
     "GITHUB_TRENDING_BRIDGE_STATE",
     "GITHUB_TRENDING_COLLECT_JOB",
+    "GITHUB_TRENDING_README_PROGRESS",
     "GITHUB_TRENDING_CONTENT_READY",
     "GITHUB_TRENDING_GET_STATE",
     "GITHUB_TRENDING_SAVE_CONFIG",
@@ -200,6 +208,8 @@ async function startCollectionJob(job) {
     url: job.url || "https://github.com/trending?since=daily",
     tabId: null,
     phase: "opening",
+    readmeDelayMinMs: Number(job.readmeDelayMinMs),
+    readmeDelayMaxMs: Number(job.readmeDelayMaxMs),
     startedAt: new Date().toISOString()
   };
   await chrome.storage.local.set({ [ACTIVE_JOB_KEY]: nextActiveJob });
@@ -254,7 +264,9 @@ async function handleTrendingTabReady(tabId) {
     });
     const enrichedResponse = await chrome.runtime.sendMessage({
       type: "GITHUB_TRENDING_ENRICH_READMES",
-      items: response.items
+      items: response.items,
+      readmeDelayMinMs: activeJob.readmeDelayMinMs,
+      readmeDelayMaxMs: activeJob.readmeDelayMaxMs
     });
     if (!enrichedResponse?.ok || !Array.isArray(enrichedResponse.items)) {
       throw new Error(enrichedResponse?.error || "readme_enrichment_failed");
