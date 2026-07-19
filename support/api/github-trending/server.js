@@ -194,6 +194,17 @@ function createApp(options = {}) {
       return sendJson(response, 200, { ok: true, items });
     }
 
+    const snapshotDetailMatch = pathname.match(/^\/api\/github-trending\/snapshots\/([^/]+)\/([^/]+)\/([^/]+)$/);
+    if (request.method === "GET" && snapshotDetailMatch) {
+      const trendDate = normalizeDate(decodeURIComponent(snapshotDetailMatch[1]));
+      const owner = normalizeRequiredString(decodeURIComponent(snapshotDetailMatch[2]), 200, "invalid_owner");
+      const repository = normalizeRequiredString(decodeURIComponent(snapshotDetailMatch[3]), 200, "invalid_repository");
+      const item = store.getSnapshot(trendDate, `${owner}/${repository}`);
+      return item
+        ? sendJson(response, 200, { ok: true, item })
+        : sendJson(response, 404, { ok: false, error: "snapshot_not_found" });
+    }
+
     return sendJson(response, 404, { ok: false, error: "not_found" });
   }
 

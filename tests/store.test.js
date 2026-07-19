@@ -46,6 +46,8 @@ test("persists settings and reports snapshot/job statistics", () => {
       latestTrendDate: "2026-07-19"
     });
     assert.equal(store.listSnapshots({ trendDate: "2026-07-19", includeReadme: false })[0].hasReadme, 1);
+    assert.equal(store.getSnapshot("2026-07-19", "openai/codex").readmeContent, "# Codex");
+    assert.equal(store.getSnapshot("2026-07-19", "missing/repository"), null);
   } finally {
     store.close();
     for (const candidate of [databasePath, `${databasePath}-shm`, `${databasePath}-wal`]) {

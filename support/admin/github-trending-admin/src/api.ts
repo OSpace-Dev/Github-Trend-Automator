@@ -39,6 +39,12 @@ export interface Snapshot {
   readmeError: string | null;
 }
 
+export interface SnapshotDetail extends Snapshot {
+  readmeContent: string | null;
+  readmeUrl: string | null;
+  capturedAt: string;
+}
+
 export function createApiClient() {
   const origin = localStorage.getItem("github-trending-admin-origin") || "http://127.0.0.1:8011";
   const token = localStorage.getItem("github-trending-admin-token") || "dev-github-trending-api-token";
@@ -57,6 +63,10 @@ export function createApiClient() {
     updateSettings: (settings: Pick<Settings, "scheduleTime" | "readmeDelayMinSeconds" | "readmeDelayMaxSeconds">) => request<{ settings: Settings; schedule: { nextRunAt: string | null } }>("/api/github-trending/settings", { method: "PUT", body: JSON.stringify(settings) }),
     createJob: () => request<{ job: Job }>("/api/github-trending/jobs", { method: "POST", body: "{}" }),
     getJobs: () => request<{ jobs: Job[] }>("/api/github-trending/jobs?limit=20"),
-    getSnapshots: (date: string) => request<{ items: Snapshot[] }>(`/api/github-trending/snapshots?date=${encodeURIComponent(date)}&limit=100&includeReadme=0`)
+    getSnapshots: (date: string) => request<{ items: Snapshot[] }>(`/api/github-trending/snapshots?date=${encodeURIComponent(date)}&limit=100&includeReadme=0`),
+    getSnapshot: (item: Snapshot) => {
+      const [owner, repository] = item.fullName.split("/");
+      return request<{ item: SnapshotDetail }>(`/api/github-trending/snapshots/${encodeURIComponent(item.trendDate)}/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`);
+    }
   };
 }

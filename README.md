@@ -21,26 +21,67 @@ tests/                                       Node.js regression tests
 
 The collector uses public GitHub pages and the public README API. It does not store a GitHub password, cookie, Personal Access Token, or SSH private key.
 
-## Quick Start
+## Running the Project
 
-From this directory:
+The commands below use Windows PowerShell and are run from the repository root: the `github-trend-automator` directory containing `package.json`, `plugins/`, and `support/`.
+
+### 1. Run the Backend in a Terminal
+
+Working directory: repository root.
 
 ```powershell
-npm install
 npm start
 ```
 
-The service listens on `http://127.0.0.1:8011`. After starting the extension, load `plugins/trending-collector/` as an unpacked extension from `chrome://extensions/` or `edge://extensions/`.
+The service listens on `http://127.0.0.1:8011`. Keep this terminal running.
 
-In another terminal, install and start the management page:
+### 2. Debug the Backend
+
+Working directory: repository root. This enables Node Inspector at `127.0.0.1:9229`.
 
 ```powershell
-cd support/admin/github-trending-admin
-npm install
-npm run dev
+npm run start:debug
 ```
 
-Open `http://127.0.0.1:5174`. The page stores only the local API origin and API token in browser `localStorage`; the default values are development placeholders.
+Attach Chrome DevTools or the VS Code Node.js debugger to port `9229`.
+
+### 3. Install Management Page Dependencies
+
+Run this after the first checkout or when `package-lock.json` changes. Working directory: repository root.
+
+```powershell
+npm --prefix support/admin/github-trending-admin install
+```
+
+### 4. Run the Management Page in Development Mode
+
+Open another PowerShell terminal. Working directory: repository root.
+
+```powershell
+npm run admin:dev
+```
+
+Open `http://127.0.0.1:5174`. Vite reloads the page when source files change.
+
+### 5. Build and Preview the Management Page
+
+Working directory: repository root.
+
+```powershell
+npm run admin:build
+npm run admin:preview
+```
+
+The production build is written to `support/admin/github-trending-admin/dist/`. The preview URL is `http://127.0.0.1:4174`.
+
+### 6. Load the Browser Extension
+
+1. Keep the backend service running.
+2. Open `chrome://extensions/` or `edge://extensions/`.
+3. Enable Developer mode and choose **Load unpacked**.
+4. Select the `plugins/trending-collector/` directory under the repository root.
+
+The management page stores only the local API origin and API token in browser `localStorage`; the default values are development placeholders.
 
 ## Collection and Scheduling
 
@@ -61,6 +102,7 @@ All `/api/` endpoints require `Authorization: Bearer <GITHUB_TRENDING_API_TOKEN>
 | `POST` | `/api/github-trending/jobs` | Queue a manual collection job |
 | `GET` | `/api/github-trending/jobs` | List recent jobs |
 | `GET` | `/api/github-trending/snapshots?date=YYYY-MM-DD` | Read a daily snapshot (`includeReadme=0` returns summaries) |
+| `GET` | `/api/github-trending/snapshots/{date}/{owner}/{repository}` | Read one complete snapshot and its README source |
 
 ## Configuration
 

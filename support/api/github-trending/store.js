@@ -300,6 +300,14 @@ class TrendingStore {
     `).all(limit, offset);
   }
 
+  getSnapshot(trendDate, fullName) {
+    return this.db.prepare(`
+      SELECT ${SNAPSHOT_COLUMNS} FROM snapshots
+      WHERE trend_date = ? AND full_name = ?
+      LIMIT 1
+    `).get(trendDate, fullName) || null;
+  }
+
   close() {
     this.db.close();
   }

@@ -84,6 +84,21 @@ test("stores a completed daily Trending snapshot", async () => {
     assert.equal(snapshots.items[0].fullName, "openai/codex");
     assert.equal(snapshots.items[0].readmeContent, "# Codex");
 
+    const detailResponse = await fetch(
+      `${baseUrl}/api/github-trending/snapshots/${created.job.trendDate}/openai/codex`,
+      { headers: { Authorization: "Bearer api-test-token" } }
+    );
+    assert.equal(detailResponse.status, 200);
+    const detail = await detailResponse.json();
+    assert.equal(detail.item.fullName, "openai/codex");
+    assert.equal(detail.item.readmeContent, "# Codex");
+
+    const missingDetailResponse = await fetch(
+      `${baseUrl}/api/github-trending/snapshots/${created.job.trendDate}/openai/missing`,
+      { headers: { Authorization: "Bearer api-test-token" } }
+    );
+    assert.equal(missingDetailResponse.status, 404);
+
     const jobResponse = await fetch(`${baseUrl}/api/github-trending/jobs/${jobId}`, {
       headers: { Authorization: "Bearer api-test-token" }
     });

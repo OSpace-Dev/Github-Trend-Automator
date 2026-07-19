@@ -5,10 +5,12 @@
   "description": "Daily GitHub Trending collection through a browser extension and local SQLite service.",
   "scripts": {
     "start": "node support/api/github-trending/server.js",
+    "start:debug": "node --inspect=127.0.0.1:9229 support/api/github-trending/server.js",
     "test": "node --test",
     "check": "node --check support/api/github-trending/server.js && node --check support/api/github-trending/scheduler.js && node --check support/api/github-trending/store.js && node --check plugins/trending-collector/background.js && node --check plugins/trending-collector/content-script.js",
     "admin:dev": "npm --prefix support/admin/github-trending-admin run dev",
     "admin:build": "npm --prefix support/admin/github-trending-admin run build",
+    "admin:preview": "npm --prefix support/admin/github-trending-admin run preview",
     "admin:typecheck": "npm --prefix support/admin/github-trending-admin run typecheck"
   },
   "engines": {
